@@ -1,6 +1,6 @@
 // # Posts API
 // RESTful API for the Post resource
-var when            = require('when'),
+var Promise         = require('bluebird'),
     _               = require('lodash'),
     dataProvider    = require('../models'),
     canThis         = require('../permissions').canThis,
@@ -8,13 +8,14 @@ var when            = require('when'),
     utils           = require('./utils'),
 
     docName         = 'posts',
-    allowedIncludes = ['created_by', 'updated_by', 'published_by', 'author', 'tags', 'fields'],
+    allowedIncludes = ['created_by', 'updated_by', 'published_by', 'author', 'tags', 'fields', 'next', 'previous'],
     posts;
 
 // ## Helpers
 function prepareInclude(include) {
     var index;
 
+    include = include || '';
     include = _.intersection(include.split(','), allowedIncludes);
     index = include.indexOf('author');
 
@@ -44,7 +45,7 @@ posts = {
      * Can return posts for a particular tag by passing a tag slug in
      *
      * @public
-     * @param {{context, page, limit, status, staticPages, tag}} options (optional)
+     * @param {{context, page, limit, status, staticPages, tag, featured}} options (optional)
      * @returns {Promise(Posts)} Posts Collection with Meta
      */
     browse: function browse(options) {
@@ -63,19 +64,20 @@ posts = {
 
     /**
      * ### Read
-     * Find a post, by ID or Slug
+     * Find a post, by ID, UUID, or Slug
      *
      * @public
      * @param {{id_or_slug (required), context, status, include, ...}} options
      * @return {Promise(Post)} Post
      */
     read: function read(options) {
-        var attrs = ['id', 'slug', 'status'],
+        var attrs = ['id', 'slug', 'status', 'uuid'],
             data = _.pick(options, attrs);
+
         options = _.omit(options, attrs);
 
         // only published posts if no user is present
-        if (!(options.context && options.context.user)) {
+        if (!data.uuid && !(options.context && options.context.user)) {
             data.status = 'published';
         }
 
@@ -85,11 +87,10 @@ posts = {
 
         return dataProvider.Post.findOne(data, options).then(function (result) {
             if (result) {
-                return { posts: [ result.toJSON() ]};
+                return {posts: [result.toJSON(options)]};
             }
 
-            return when.reject(new errors.NotFoundError('Post not found.'));
-
+            return Promise.reject(new errors.NotFoundError('Post not found.'));
         });
     },
 
@@ -104,7 +105,7 @@ posts = {
      */
     edit: function edit(object, options) {
         return canThis(options.context).edit.post(options.id).then(function () {
-            return utils.checkObject(object, docName).then(function (checkedPostData) {
+            return utils.checkObject(object, docName, options.id).then(function (checkedPostData) {
                 if (options.include) {
                     options.include = prepareInclude(options.include);
                 }
@@ -112,20 +113,20 @@ posts = {
                 return dataProvider.Post.edit(checkedPostData.posts[0], options);
             }).then(function (result) {
                 if (result) {
-                    var post = result.toJSON();
+                    var post = result.toJSON(options);
 
                     // If previously was not published and now is (or vice versa), signal the change
                     post.statusChanged = false;
                     if (result.updated('status') !== result.get('status')) {
                         post.statusChanged = true;
                     }
-                    return { posts: [ post ]};
+                    return {posts: [post]};
                 }
 
-                return when.reject(new errors.NotFoundError('Post not found.'));
+                return Promise.reject(new errors.NotFoundError('Post not found.'));
             });
         }, function () {
-            return when.reject(new errors.NoPermissionError('You do not have permission to edit this post.'));
+            return Promise.reject(new errors.NoPermissionError('You do not have permission to edit posts.'));
         });
     },
 
@@ -149,19 +150,18 @@ posts = {
 
                 return dataProvider.Post.add(checkedPostData.posts[0], options);
             }).then(function (result) {
-                var post = result.toJSON();
+                var post = result.toJSON(options);
 
                 if (post.status === 'published') {
                     // When creating a new post that is published right now, signal the change
                     post.statusChanged = true;
                 }
-                return { posts: [ post ]};
+                return {posts: [post]};
             });
         }, function () {
-            return when.reject(new errors.NoPermissionError('You do not have permission to add posts.'));
+            return Promise.reject(new errors.NoPermissionError('You do not have permission to add posts.'));
         });
     },
-
 
     /**
      * ### Destroy
@@ -188,7 +188,7 @@ posts = {
                 });
             });
         }, function () {
-            return when.reject(new errors.NoPermissionError('You do not have permission to remove posts.'));
+            return Promise.reject(new errors.NoPermissionError('You do not have permission to remove posts.'));
         });
     }
 

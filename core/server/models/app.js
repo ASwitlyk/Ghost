@@ -2,13 +2,11 @@ var ghostBookshelf = require('./base'),
     App,
     Apps;
 
-
-
 App = ghostBookshelf.Model.extend({
     tableName: 'apps',
 
     saving: function (newPage, attr, options) {
-         /*jshint unused:false*/
+        /*jshint unused:false*/
         var self = this;
 
         ghostBookshelf.Model.prototype.saving.apply(this, arguments);
@@ -24,7 +22,6 @@ App = ghostBookshelf.Model.extend({
     },
 
     permissions: function () {
-        // Have to use the require here because of circular dependencies
         return this.belongsToMany('Permission', 'permissions_apps');
     },
 
